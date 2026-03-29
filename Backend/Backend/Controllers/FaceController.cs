@@ -18,11 +18,7 @@ namespace Backend.Controllers
         {
             _context = context;
             _httpClient = httpClientFactory.CreateClient();
-            
-            // Base URL for the Python AI Service
             _httpClient.BaseAddress = new Uri("http://localhost:8000/");
-
-            // Ensure Uploads directory exists
             _uploadPath = Path.Combine(Directory.GetCurrentDirectory(), "Uploads");
             if (!Directory.Exists(_uploadPath))
             {
@@ -89,7 +85,6 @@ namespace Backend.Controllers
             {
                 return StatusCode(500, $"Failed to contact AI Service: {ex.Message}");
             }
-            // 3. Save User to SQL Server Database
             var user = new User
             {
                 Name = name,
@@ -97,13 +92,10 @@ namespace Backend.Controllers
                 ImagePath = fileName,
                 CreatedAt = DateTime.UtcNow
             };
-
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
-
             return Ok(new { Message = "Face Enrolled Successfully", UserId = user.Id, Name = user.Name });
         }
-
         [HttpGet("strangers")]
         public async Task<IActionResult> GetStrangers()
         {
