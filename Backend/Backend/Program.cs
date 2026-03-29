@@ -35,7 +35,14 @@ if (!Directory.Exists(uploadsPath)) Directory.CreateDirectory(uploadsPath);
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new PhysicalFileProvider(uploadsPath),
-    RequestPath = "/Uploads"
+    RequestPath = "/Uploads",
+    OnPrepareResponse = ctx =>
+    {
+        // Strictly prevent browser/proxy caching for images in this folder
+        ctx.Context.Response.Headers.Append("Cache-Control", "no-store, no-cache, must-revalidate");
+        ctx.Context.Response.Headers.Append("Pragma", "no-cache");
+        ctx.Context.Response.Headers.Append("Expires", "0");
+    }
 });
 app.MapControllers();
 app.Run();

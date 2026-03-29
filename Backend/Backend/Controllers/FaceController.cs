@@ -140,6 +140,21 @@ namespace Backend.Controllers
             _context.Users.Remove(user);
             await _context.SaveChangesAsync();
 
+            // 3. Notify Python AI Service to remove from its in-memory cache
+            try
+            {
+                var response = await _httpClient.DeleteAsync($"user_cache/{id}?name={Uri.EscapeDataString(user.Name)}");
+                if (!response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"[Warning] Failed to notify AI service of deletion for ID {id}: {response.StatusCode}");
+                }
+            }
+            catch (Exception ex)
+            {
+                // We log but don't fail the deletion if the AI service is just busy/down
+                Console.WriteLine($"[Error] Could not contact AI service for cache sync: {ex.Message}");
+            }
+
             return Ok(new { Message = "User and image deleted successfully." });
         }
 
@@ -152,10 +167,54 @@ namespace Backend.Controllers
                 return NotFound();
             }
 
-            user.Name = request.Name;
+            string oldName = user.Name;
+            string newName = request.Name;
+
+            // 1. Handle File Renaming if ImagePath exists
+            if (!string.IsNullOrEmpty(user.ImagePath))
+            {
+                try
+                {
+                    var oldFilePath = Path.Combine(_uploadPath, user.ImagePath);
+                    if (System.IO.File.Exists(oldFilePath))
+                    {
+                        // Create a safe filename: "New_Name_Timestamp.ext" to avoid collisions
+                        var extension = Path.GetExtension(user.ImagePath);
+                        var safeNewName = string.Join("_", newName.Split(Path.GetInvalidFileNameChars()));
+                        var newFileName = $"{safeNewName.Replace(" ", "_")}_{DateTime.UtcNow.Ticks}{extension}";
+                        var newFilePath = Path.Combine(_uploadPath, newFileName);
+
+                        System.IO.File.Move(oldFilePath, newFilePath);
+                        user.ImagePath = newFileName;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Log error but allow name change to proceed or return error?
+                    // Better to return error if file system is protected
+                    return StatusCode(500, $"Failed to rename image file: {ex.Message}");
+                }
+            }
+
+            user.Name = newName;
             await _context.SaveChangesAsync();
 
-            return Ok(new { Message = "User updated successfully." });
+            // 2. Notify Python AI Service about the name change
+            try
+            {
+                var updatePayload = new { old_name = oldName, new_name = newName };
+                var response = await _httpClient.PutAsJsonAsync($"user_cache/rename", updatePayload);
+                if (!response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"[Warning] Failed to notify AI service of rename: {response.StatusCode}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Error] Could not contact AI service for rename cache sync: {ex.Message}");
+            }
+
+            return Ok(new { Message = "User and image renamed successfully.", ImagePath = user.ImagePath });
         }
     }
 

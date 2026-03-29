@@ -19,7 +19,8 @@ function App() {
     let stream = null;
     const startCamera = async () => {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+        // Increased webcam resolution to 720p HD for higher recognition accuracy
+        stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, ideal: { width: 1280, height: 720 } } });
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -48,49 +49,24 @@ function App() {
     }
   }, [activeTab]);
 
-  // Handle Detection Lifecycle (WebSocket + Interval)
+  // 1. WebSocket Lifecycle (Persistent Connection)
   useEffect(() => {
-    if (activeTab !== 'detect') {
-      if (activeTab === 'history') fetchStrangers();
-      return;
-    }
-
-    let intervalId = null;
-    let ws = null;
-    let isComponentMounted = true;
+    let isMounted = true;
+    let reconnectTimeout = null;
 
     const connectWS = () => {
-      ws = new WebSocket('ws://localhost:8000/match_frame');
+      console.log('Attempting WebSocket connection...');
+      const ws = new WebSocket('ws://localhost:8000/match_frame');
       wsRef.current = ws;
 
       ws.onopen = () => {
-        if (!isComponentMounted) {
-          ws.close();
-          return;
-        }
+        if (!isMounted) return;
         console.log('WebSocket Connected');
-        setStatus('Real-time detection active');
-
-        intervalId = setInterval(() => {
-          if (!videoRef.current || !canvasRef.current || ws.readyState !== WebSocket.OPEN) return;
-
-          const video = videoRef.current;
-          const canvas = canvasRef.current;
-          const ctx = canvas.getContext('2d');
-
-          canvas.width = video.videoWidth || 640;
-          canvas.height = video.videoHeight || 480;
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-          canvas.toBlob((blob) => {
-            if (blob && ws.readyState === WebSocket.OPEN) {
-              ws.send(blob);
-            }
-          }, 'image/jpeg', 0.8);
-        }, 200);
+        setStatus('Real-time detection ready');
       };
 
       ws.onmessage = (event) => {
+        if (!isMounted) return;
         try {
           const data = JSON.parse(event.data);
           if (data.matches) setMatches(data.matches);
@@ -100,32 +76,88 @@ function App() {
       };
 
       ws.onclose = () => {
-        if (isComponentMounted) {
-          console.log('WebSocket Disconnected');
-          setStatus('Monitoring paused');
-          setMatches([]);
-        }
+        if (!isMounted) return;
+        console.log('WebSocket Disconnected');
+        setStatus('Connection lost. Reconnecting...');
+        setMatches([]);
+        // Auto-reconnect after 3 seconds
+        reconnectTimeout = setTimeout(connectWS, 3000);
       };
 
       ws.onerror = (e) => {
-        if (isComponentMounted) {
-          console.error("WebSocket error:", e);
-        }
+        console.error("WebSocket error:", e);
       };
     };
 
     connectWS();
 
     return () => {
-      isComponentMounted = false;
-      if (intervalId) clearInterval(intervalId);
-      if (ws) {
-        // Only close if it's not already closing or closed
-        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-          ws.close();
-        }
+      isMounted = false;
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
       }
-      wsRef.current = null;
+    };
+  }, []);
+
+  // 2. Detection Logic (Synchronized Ping-Pong Loop)
+  useEffect(() => {
+    if (activeTab === 'history') {
+      fetchStrangers();
+      return;
+    }
+
+    let isTabMounted = true;
+
+    const sendFrame = () => {
+      const ws = wsRef.current;
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+
+      if (!isTabMounted || activeTab !== 'detect' || !video || !canvas || !ws || ws.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      const ctx = canvas.getContext('2d');
+      // Sending full 720p HD frame over WebSocket for highly accurate face cropping
+      canvas.width = 1280;
+      canvas.height = 720;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      canvas.toBlob((blob) => {
+        if (blob && ws.readyState === WebSocket.OPEN && isTabMounted) {
+          ws.send(blob);
+        }
+      }, 'image/jpeg', 0.95);
+    };
+
+    // Initial trigger when entering 'detect' tab
+    if (activeTab === 'detect' && wsRef.current?.readyState === WebSocket.OPEN) {
+      sendFrame();
+    }
+
+    // Attach listener to the persistent socket specifically for this tab session
+    const handleResponse = (event) => {
+      if (!isTabMounted || activeTab !== 'detect') return;
+      
+      // Small 50ms delay to give the UI breathing room before next frame
+      setTimeout(sendFrame, 50);
+    };
+
+    const ws = wsRef.current;
+    if (ws) {
+      ws.addEventListener('message', handleResponse);
+      // Also trigger if it was already connecting and just opened
+      ws.addEventListener('open', sendFrame);
+    }
+
+    return () => {
+      isTabMounted = false;
+      if (ws) {
+        ws.removeEventListener('message', handleResponse);
+        ws.removeEventListener('open', sendFrame);
+      }
     };
   }, [activeTab]);
 
@@ -215,23 +247,32 @@ function App() {
                 const [x1, y1, x2, y2] = match.bbox;
                 const w = x2 - x1;
                 const h = y2 - y1;
-                // Render bounding box
                 return (
-                  <div key={i} className="absolute border-[3px] border-cyan-400 bg-cyan-400/10 box-border rounded-lg shadow-[0_0_15px_rgba(6,182,212,0.8)] transition-all duration-75 ease-linear pointer-events-none" style={{
-                    left: `${(x1 / 640) * 100}%`,
-                    top: `${(y1 / 480) * 100}%`,
-                    width: `${(w / 640) * 100}%`,
-                    height: `${(h / 480) * 100}%`
-                  }}>
-                    <div className="absolute -top-8 left-[-3px] bg-cyan-400 text-black px-3 py-1 text-sm font-extrabold whitespace-nowrap rounded-t-lg shadow-lg flex items-center space-x-2">
-                      <span className="truncate max-w-[120px]">{match.name}</span>
-                      {match.name !== 'Unknown' && (
-                        <span className="text-cyan-900 drop-shadow-sm text-xs border border-cyan-900/50 rounded-full px-1.5 py-0.5 ml-1 bg-cyan-300 font-bold">
-                          {(match.score * 100).toFixed(0)}%
-                        </span>
-                      )}
+                  <React.Fragment key={i}>
+                    {/* Render bounding box */}
+                    <div className="absolute border-[3px] border-cyan-400 bg-cyan-400/10 box-border rounded-lg shadow-[0_0_15px_rgba(6,182,212,0.8)] transition-all duration-75 ease-linear pointer-events-none z-10" style={{
+                      left: `${(x1 / 1280) * 100}%`,
+                      top: `${(y1 / 720) * 100}%`,
+                      width: `${(w / 1280) * 100}%`,
+                      height: `${(h / 720) * 100}%`
+                    }}>
+                      <div className="absolute -top-8 left-[-3px] bg-cyan-400 text-black px-3 py-1 text-sm font-extrabold whitespace-nowrap rounded-t-lg shadow-lg flex items-center space-x-2">
+                        <span className="truncate max-w-[120px]">{match.name}</span>
+                        {match.name !== 'Unknown' && (
+                          <span className="text-cyan-900 drop-shadow-sm text-xs border border-cyan-900/50 rounded-full px-1.5 py-0.5 ml-1 bg-cyan-300 font-bold">
+                            {(match.score * 100).toFixed(0)}%
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                    {/* Render Facial Landmarks */}
+                    {match.landmarks && match.landmarks.map((lm, idx) => (
+                      <div key={`lm-${i}-${idx}`} className="absolute w-2 h-2 bg-amber-400 rounded-full shadow-[0_0_10px_rgba(251,191,36,0.9)] border border-amber-200 pointer-events-none z-20 transition-all duration-75 ease-linear" style={{
+                        left: `calc(${(lm[0] / 1280) * 100}% - 4px)`,
+                        top: `calc(${(lm[1] / 720) * 100}% - 4px)`
+                      }}></div>
+                    ))}
+                  </React.Fragment>
                 )
               })}
             </div>
@@ -261,10 +302,10 @@ function App() {
                           <div className="flex-1 min-w-0">
                             <p className={`${m.name.startsWith('Stranger') ? 'text-amber-400' : 'text-cyan-400'} text-xs font-black truncate uppercase`}>{m.name}</p>
                             <div className="flex items-center mt-0.5">
-                                <div className="h-1 bg-neutral-800 rounded-full flex-1 overflow-hidden">
-                                    <div className="h-full bg-cyan-500 rounded-full transition-all duration-500" style={{ width: `${(m.score * 100).toFixed(0)}%` }}></div>
-                                </div>
-                                <span className="text-[9px] text-neutral-500 ml-2 font-mono">{(m.score * 100).toFixed(0)}%</span>
+                              <div className="h-1 bg-neutral-800 rounded-full flex-1 overflow-hidden">
+                                <div className="h-full bg-cyan-500 rounded-full transition-all duration-500" style={{ width: `${(m.score * 100).toFixed(0)}%` }}></div>
+                              </div>
+                              <span className="text-[9px] text-neutral-500 ml-2 font-mono">{(m.score * 100).toFixed(0)}%</span>
                             </div>
                           </div>
                         </div>
@@ -304,11 +345,31 @@ function App() {
                               <input
                                 value={editName}
                                 onChange={(e) => setEditName(e.target.value)}
-                                className="bg-neutral-900 border border-neutral-700 text-xs rounded px-2 py-1 w-full text-white"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    saveEdit(s.id);
+                                  } else if (e.key === 'Escape') {
+                                    setEditingId(null);
+                                  }
+                                }}
+                                className="bg-neutral-900 border border-amber-500/50 text-sm rounded-lg px-3 py-1.5 w-full text-white focus:outline-none focus:ring-2 focus:ring-amber-500/30 transition-all"
                                 autoFocus
                               />
-                              <button onClick={() => saveEdit(s.id)} className="text-cyan-400 text-[10px] font-bold">Save</button>
-                              <button onClick={() => setEditingId(null)} className="text-neutral-500 text-[10px]">Cancel</button>
+                              <div className="flex items-center space-x-2 ml-2">
+                                <button 
+                                  onClick={() => saveEdit(s.id)} 
+                                  className="bg-amber-500 hover:bg-amber-600 text-black px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-colors shadow-lg shadow-amber-500/20"
+                                >
+                                  Save
+                                </button>
+                                <button 
+                                  onClick={() => setEditingId(null)} 
+                                  className="text-neutral-400 hover:text-white px-1 py-1 transition-colors"
+                                  title="Cancel"
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                </button>
+                              </div>
                             </div>
                           ) : (
                             <>
