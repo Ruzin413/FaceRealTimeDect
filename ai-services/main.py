@@ -30,6 +30,24 @@ face_app = FaceAnalysis(name='antelopev2', providers=['CPUExecutionProvider'])
 face_app.prepare(ctx_id=0, det_size=(640, 640))
 print("FaceAnalysis Ready!")
 
+# --- Database Connection Logic ---
+# DB Connection Details from appsettings.json
+DB_CONNECTION_STRING = (
+    "DRIVER={ODBC Driver 17 for SQL Server};"
+    "SERVER=DESKTOP-6E3VAT1\\SQLEXPRESS;"
+    "DATABASE=VideoFaceDetect;"
+    "Trusted_Connection=yes;"
+)
+
+def get_db_connection():
+    try:
+        conn = pyodbc.connect(DB_CONNECTION_STRING)
+        return conn
+    except Exception as e:
+        print(f"Database connection error: {e}")
+        return None
+# ---------------------------------
+
 # Global stranger counter and local user cache
 stranger_counter = 0
 users_cache = []
@@ -44,12 +62,12 @@ def get_initial_stranger_count():
         cursor = conn.cursor()
         try:
             # Find the highest Number in "Stranger {Number}"
-            cursor.execute("SELECT Name FROM Users WHERE Name LIKE 'Stranger %'")
+            # Check if table exists first for robustness
+            cursor.execute("IF OBJECT_ID('Users', 'U') IS NOT NULL SELECT Name FROM Users WHERE Name LIKE 'Stranger %'")
             rows = cursor.fetchall()
             max_num = 0
             for row in rows:
                 try:
-                    # Expecting "Stranger X"
                     parts = row.Name.split(' ')
                     if len(parts) >= 2:
                         num = int(parts[1])
@@ -58,11 +76,14 @@ def get_initial_stranger_count():
                 except:
                     continue
             stranger_counter = max_num
-            print(f"Initialized stranger_counter to {stranger_counter}")
+            print(f"Synced stranger_counter from DB: {stranger_counter}")
         except Exception as e:
             print(f"Error initializing stranger counter: {e}")
         finally:
             conn.close()
+
+# Call sync on server startup
+get_initial_stranger_count()
 
 # Shared Uploads Path (Backend folder)
 # Get absolute path relative to this script's location for robustness
@@ -100,22 +121,6 @@ def save_new_stranger(name, embedding_np, face_img):
             conn.close()
     return False
 
-# DB Connection Details from appsettings.json
-DB_CONNECTION_STRING = (
-    "DRIVER={ODBC Driver 17 for SQL Server};"
-    "SERVER=DESKTOP-6E3VAT1\\SQLEXPRESS;"
-    "DATABASE=VideoFaceDetect;"
-    "Trusted_Connection=yes;"
-)
-
-def get_db_connection():
-    try:
-        conn = pyodbc.connect(DB_CONNECTION_STRING)
-        return conn
-    except Exception as e:
-        print(f"Database connection error: {e}")
-        return None
-
 def compute_similarity(embedding1, embedding2):
     return np.dot(embedding1, embedding2) / (np.linalg.norm(embedding1) * np.linalg.norm(embedding2))
 
@@ -145,10 +150,17 @@ async def match_frame(websocket: WebSocket):
     """WebSocket endpoint to receive frames, process matching, and return results."""
     await websocket.accept()
     
+    global recent_enrollments
+    global users_cache
+    global stranger_counter
+    
+    # IMPORTANT: Clear local temporary cache on every new tab switch/connection
+    # This forces the AI to look at the database (which has the new edited name)
+    recent_enrollments = [] 
+
     # Preload embeddings from DB
     get_initial_stranger_count()
     conn = get_db_connection()
-    global users_cache
     users_cache = []
     if conn:
         cursor = conn.cursor()
@@ -191,7 +203,6 @@ async def match_frame(websocket: WebSocket):
                             best_match_name = user["name"]
                 if best_match_name == "Unknown":
                     current_time = time.time()
-                    global recent_enrollments
                     recent_enrollments = [e for e in recent_enrollments if current_time - e["timestamp"] < ENROLLMENT_COOLDOWN]
                     
                     for r_enroll in recent_enrollments:
@@ -201,7 +212,6 @@ async def match_frame(websocket: WebSocket):
                             best_match_score = sim
                             break
                 if best_match_name == "Unknown":
-                    global stranger_counter
                     stranger_counter += 1
                     new_name = f"Stranger {stranger_counter}"
                     x1, y1, x2, y2 = map(int, face.bbox)

@@ -127,10 +127,20 @@ namespace Backend.Controllers
                 return NotFound();
             }
 
+            // Delete Image on file system
+            if (!string.IsNullOrEmpty(user.ImagePath))
+            {
+                var fullPath = Path.Combine(_uploadPath, user.ImagePath);
+                if (System.IO.File.Exists(fullPath))
+                {
+                    System.IO.File.Delete(fullPath);
+                }
+            }
+
             _context.Users.Remove(user);
             await _context.SaveChangesAsync();
 
-            return Ok(new { Message = "User deleted successfully." });
+            return Ok(new { Message = "User and image deleted successfully." });
         }
 
         [HttpPut("{id}")]

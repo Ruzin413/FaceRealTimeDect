@@ -177,3 +177,4 @@ C:\Users\Dell\Desktop\FaceRealTimedect\Backend\Backend\obj\Debug\net10.0\refint\
 C:\Users\Dell\Desktop\FaceRealTimedect\Backend\Backend\obj\Debug\net10.0\Backend.pdb
 C:\Users\Dell\Desktop\FaceRealTimedect\Backend\Backend\obj\Debug\net10.0\Backend.genruntimeconfig.cache
 C:\Users\Dell\Desktop\FaceRealTimedect\Backend\Backend\obj\Debug\net10.0\ref\Backend.dll
+C:\Users\Dell\Desktop\FaceRealTimedect\Backend\Backend\obj\Debug\net10.0\Backend.sourcelink.json
