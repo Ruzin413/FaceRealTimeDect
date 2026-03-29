@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+python-multipart
+websockets
+insightface
+onnxruntime
+opencv-python
+numpy
+pyodbc
+psutil
