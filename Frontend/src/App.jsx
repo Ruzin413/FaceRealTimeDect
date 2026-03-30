@@ -229,7 +229,6 @@ function App() {
         </div>
 
         <div className="bg-neutral-800/80 backdrop-blur-xl rounded-3xl p-6 shadow-2xl border border-neutral-700/50 flex flex-col md:flex-row gap-8 relative overflow-hidden">
-
           {/* Left Column: Camera (Only in Detect Tab) */}
           {activeTab === 'detect' && (
             <div className="flex-1 relative rounded-2xl overflow-hidden bg-black aspect-video flex items-center justify-center border border-neutral-700 shadow-[inset_0_2px_20px_rgba(0,0,0,0.8)]">
@@ -240,7 +239,6 @@ function App() {
                 muted
                 className="w-full h-full object-cover"
               ></video>
-              {/* Hidden canvas for extraction */}
               <canvas ref={canvasRef} className="hidden"></canvas>
               {/* Bounding box overlays */}
               {activeTab === 'detect' && matches.map((match, i) => {
@@ -322,7 +320,6 @@ function App() {
                   </h3>
                   <button onClick={fetchStrangers} className="text-[10px] text-neutral-500 hover:text-white transition-colors uppercase font-bold">Refresh</button>
                 </div>
-
                 <div className="space-y-3 overflow-y-auto flex-grow pr-2 custom-scrollbar">
                   {strangers.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-40 border border-neutral-800 rounded-2xl">

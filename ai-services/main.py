@@ -19,9 +19,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 print("Initializing FaceAnalysis...")
-# Set root to current directory to use local ./models/antelopev2 folder
 face_app = FaceAnalysis(name='antelopev2', root='.', providers=['CPUExecutionProvider'])
-# Increased from 640 to 800 to significantly improve detection accuracy for small/distant faces on the new 720p feed
 face_app.prepare(ctx_id=0, det_size=(800, 800))
 print("FaceAnalysis Ready!")
 DB_CONNECTION_STRING = (
@@ -30,7 +28,6 @@ DB_CONNECTION_STRING = (
     "DATABASE=VideoFaceDetect;"
     "Trusted_Connection=yes;"
 )
-
 def get_db_connection():
     try:
         conn = pyodbc.connect(DB_CONNECTION_STRING)
@@ -38,13 +35,11 @@ def get_db_connection():
     except Exception as e:
         print(f"Database connection error: {e}")
         return None
-
 stranger_counter = 0
 users_cache = []
 recent_enrollments = []
 pending_strangers = []
 ENROLLMENT_COOLDOWN = 10.0
-
 def get_initial_stranger_count():
     global stranger_counter
     conn = get_db_connection()
@@ -98,7 +93,6 @@ def save_new_stranger(name, embedding_np, face_img):
         finally:
             conn.close()
     return False
-
 def compute_similarity(embedding1, embedding2):
     return np.dot(embedding1, embedding2) / (np.linalg.norm(embedding1) * np.linalg.norm(embedding2))
 @app.post("/extract_embedding")
@@ -116,7 +110,6 @@ async def extract_embedding(file: bytes = File(...)):
     largest_face = max(faces, key=lambda f: (f.bbox[2]-f.bbox[0]) * (f.bbox[3]-f.bbox[1]))
     embedding_list = largest_face.normed_embedding.tolist()
     return {"embedding": embedding_list}
-
 @app.delete("/user_cache/{user_id}")
 async def delete_user_cache(user_id: int, request: Request):
     """Notify the AI service that a user was deleted from the DB to sync the in-memory cache."""
@@ -142,20 +135,16 @@ async def rename_user_cache(request: Request):
     data = await request.json()
     old_name = data.get("old_name")
     new_name = data.get("new_name")
-    
     global users_cache
     global recent_enrollments
     updated = False
-    
     for u in users_cache:
         if u["name"] == old_name:
             u["name"] = new_name
             updated = True
-            
     for e in recent_enrollments:
         if e["name"] == old_name:
             e["name"] = new_name
-            
     if updated:
         print(f"Renamed {old_name} to {new_name} in AI cache.")
         return {"status": "success"}
@@ -240,7 +229,6 @@ async def match_frame(websocket: WebSocket):
                         if sim > 0.30:
                             matched_pending = p
                             break
-                            
                     if matched_pending is not None:
                         matched_pending["embeddings"].append(face.normed_embedding)
                         matched_pending["timestamp"] = current_time
